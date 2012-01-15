@@ -4,10 +4,11 @@ import os
 import subprocess
 import wave
 import tempfile
-import pycodegen
 import struct
 import json
 import sys
+import pyechonest.song as song
+import pyechonest.config as config
 
 supported_types = [".mp3", ".ogg", ".flac"]
 
@@ -38,7 +39,7 @@ def fingerprint(file):
 				fs.append(struct.unpack("<h", frames[i:i+2])[0]/MAGIC)
 			
 			#print "num samples", len(fs)
-			cg = pycodegen.pycodegen(fs, 10)
+			cg = song.util.codegen(fs)
 			return cg.getCodeString()
 
 	finally:
