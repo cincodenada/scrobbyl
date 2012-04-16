@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import ConfigParser
 import pprint
 import sys
 import os
@@ -9,13 +10,12 @@ import time
 import pyechonest.config as config
 import pyechonest.song as song
 from fp import fingerprint
+import lastfm
+import recorder
 
 config.ECHO_NEST_API_KEY="F4LP3UJVBPYSPVKRZ"
 
-def main(file):
-    statusfile = os.path.expanduser("~/.scrobbyl")
-    lines = []
-
+def main():
     platform = os.uname()[0]
     if platform == "Darwin":
         codegen = "./ext/codegen.Darwin"
@@ -23,8 +23,19 @@ def main(file):
     elif platform == "Linux":
         codegen = "./ext/codegen.Linux-i686"
         path = os.getenv("PATH")
-    
     config.CODEGEN_BINARY_OVERRIDE = os.path.abspath(codegen)
+
+    while(True):
+        recorder.recordAudio("recorded.wav",20)
+        try:
+            scrobbled = tagSong("recorded.wav")
+        except Exception:
+            pass
+
+def tagSong(filename):
+    #Get status info
+    statusfile = os.path.expanduser("~/.scrobbyl")
+    lines = []
 
     if os.path.exists(statusfile):
         fp = open(statusfile, "r")
@@ -33,40 +44,63 @@ def main(file):
     lasttime = 0
     lastartist = ""
     lasttrack = ""
-    if len(lines) == 3:
+    lastscrobble = 0
+    if len(lines) == 4:
         lasttime = int(lines[0])
-        lastartist = lines[1]
-        lasttrack = lines[2]
+        lastartist = lines[1].strip()
+        lasttrack = lines[2].strip()
+        lastscrobble = int(lines[3])
     
-    fp = song.util.codegen(file)
+
+
+    fp = song.util.codegen(filename)
     pprint.pprint(fp)
-    if len(fp) and "code" in fp[0]:
 
-        result = song.identify(query_obj=fp, version="4.11")
-        pprint.pprint(result)
+    #Make sure we have a valid fp
+    if fp == None or len(fp) == 0 or "code" not in fp[0]:
+        raise Exception("Could not calculate fingerprint!")
 
-        if len(result):
-            track = result[0].title
-            artist = result[0].artist_name
-            now = time.time()
+    result = song.identify(query_obj=fp, version="4.11",buckets="audio_summary")
+    pprint.pprint(result)
 
-            print (now-lasttime)
-            if now - lasttime < 100:
-                # Only scrobble if we've just been playing
-                if lasttrack != "" and lasttrack != track:
-                    print "Last track was",lasttrack,"now",track,", scrobbling"
-                    lastfm.scrobble(artist, track)
+    if len(result) == 0:
+        raise Exception("Song not found in database.")
+
+    track = result[0].title
+    artist = result[0].artist_name
+    songlength = result[0].audio_summary.duration
+
+    #Check to make sure it's not a duplicate
+    now = time.time()
+    doscrobble = True
+    if lasttime:
+        if (now - lasttime) < 100:
+            #Check for duplicate song
+            if lasttrack == track and lastartist == artist:
+                #if config.getboolean('scrobble_rules','allow_repeat') and prevlength < (now - config.get('runtime_info','last_scrobble')):
+                if False:
+                    print "Same song, but looks like it repeated..."
                 else:
-                    print "same song"
+                    print "Same song as last time, skipping..."
+                    doscrobble = False
             else:
-                print "too long since we last did it,", now-lasttime
+                print "New song!"
+        else:
+            print "It's been longer than the songlength since we last checked."
+    else:
+        lasttrack = lastartist = "none"
+        print "No previous song found."
 
-            fp = open(statusfile, "w")
-            fp.write("%d\n%s\n%s" % (now, artist, track))
-            fp.close()
+    if(doscrobble):
+        print "Last track was %s by %s, now %s by %s.  Scrobbling..." % (lasttrack, lastartist, track, artist)
+        #lastfm.scrobble(artist, track)
+        lastscrobble = now
+            
+    fp = open(statusfile, "w")
+    fp.write("%d\n%s\n%s\n%d" % (now, artist, track, lastscrobble))
+    fp.close()
+
+    return (track, artist, doscrobble)
 
 if __name__=="__main__":
-    if len(sys.argv) < 2:
-        print >>sys.stderr, "usage: %s <file>" % sys.argv[0]
-        sys.exit(0)
-    main(sys.argv[1])
+    main()
